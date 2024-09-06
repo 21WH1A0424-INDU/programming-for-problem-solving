@@ -1,0 +1,238 @@
+[8:51 pm, 2/7/2024] Pradeepthi: from flask import Flask, render_template, request, jsonify
+import cv2
+import numpy as np
+import io
+import easyocr
+import re 
+import pandas as pd
+from sklearn.ensemble import RandomForestClassifier
+import binascii
+
+app = Flask(_name_, template_folder='templates', static_url_path='/static')
+
+# Load the machine learning model
+data = pd.read_csv("C:\\Users\\siddi\\OneDrive\\Desktop\\ML project\\pincoder.csv", encoding='ISO-8859-1')
+# Assume 'data' is your DataFrame
+# Impute missing values in numerical columns with the mean
+numerical_columns = data.select_dtypes(include=['number']).columns
+data[numerical_columns] = data[numerical_columns].fillna(data[numerical_columns].mean())
+
+# Impute missing values in categorical columns with the mode
+categorical_columns = data.select_dtypes(exclude=['number']).columns
+data[categorical_columns] = data[categorical_columns].fillna(data[categorical_columns].mode().iloc[0])
+
+# Prepare the dataset
+X = data['Pincode'].values.reshape(-1, 1)  # Features (6-digit numbers)
+y_combined = data['District'] + ' - ' + data['StateName']  # Combined target variable
+
+# Train a single Random Forest classifier for both district and state names
+combined_classifier = RandomForestClassifier(n_estimators=100, random_state=42)
+combined_classifier.fit(X, y_combined)
+
+# Function to perform text extraction from the image
+def extract_text_from_image(image):
+    # Initialize the EasyOCR reader
+    reader = easyocr.Reader(['en'])
+
+    # Perform text extraction
+    results = reader.readtext(image)
+
+    # Filter extracted text to keep only 6-digit numbers
+    six_digit_numbers = []
+    for result in results:
+        text = result[1]
+        # Use a regular expression to match 6-digit numbers
+        match = re.match(r'\d{6}', text)
+        if match and len(text) == 6:
+            six_digit_numbers.append(int(text))
+
+    return six_digit_numbers
+
+@app.route('/')
+def home():
+    return render_template('index.html')
+
+
+@app.route('/upload', methods=['POST'])
+def upload():
+    # Extract the image data URL from the request
+    image_data_url = request.json['imageDataUrl']
+
+    # Decode the base64-encoded image data
+    image_data = image_data_url.split(',')[1].encode('utf-8')
+    with open('uploaded_image.jpg', 'wb') as img_file:
+        img_file.write(binascii.a2b_base64(image_data))
+
+    # Extract text from the captured image
+    six_digit_numbers = extract_text_from_image('uploaded_image.jpg')
+
+    # If no numbers are detected, provide an appropriate response
+    if not six_digit_numbers:
+        return jsonify({'error': 'No numbers detected in the image'})
+
+    # Predict combined district and state names for the example data
+    combined_predictions_example = combined_classifier.predict(np.array(six_digit_numbers).reshape(-1, 1))
+
+    predictions = []
+    for i in range(len(six_digit_numbers)):
+        pincode = six_digit_numbers[i]
+        prediction = combined_predictions_example[i]
+
+        # Check if the pincode exists in the dataset
+        if pincode in data['Pincode'].values:
+            region = data[data['Pincode'] == pincode]['Region'].values[0]
+            predictions.append({
+                'pincode': pincode,
+                'prediction': prediction,
+                'region': region
+            })
+        else:
+            predictions.append({
+                'pincode': pincode,
+                'prediction': 'Pincode not found',
+            })
+
+    return jsonify({'predictions': predictions})
+
+if _name_ == '_main_':
+    app.run(debug=True)
+[8:51 pm, 2/7/2024] Pradeepthi: <!DOCTYPE html>
+<html>
+<head>
+    <title>ORDER SEGREGATION</title>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 85vh;
+            margin: 0;
+            background-image: url('{{ url_for("static", filename="1.jpg") }}');
+            background-size: cover;
+            background-color: #c0a2d1;
+        }
+
+        #content {
+            text-align: center;
+            padding: 20px;
+            max-width: 500px;
+            margin: 0 auto;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        h1 {
+            font-size: 70px;
+            color: rgb(26, 22, 32);
+            font-style: Didot;
+            white-space: nowrap; /* Prevent wrapping */
+        }
+
+        @keyframes zoomIn {
+            0% {
+                transform: scale(0.1);
+            }
+            100% {
+                transform: scale(2s);
+            }
+        }
+
+        h1 {
+            animation: zoomIn 1s; /* Apply the zoom effect on page load */
+        }
+
+        #captureButton {
+            background-color: transparent;
+            color: rgb(16, 4, 4);
+            padding: 15px 20px;
+            border: none;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-size: 28px;
+        }
+
+        #cameraOutput {
+            text-align: center;
+            margin-top: 20px;
+            font-size: 24px;
+        }
+    </style>
+</head>
+<body>
+    <div id="content">
+        <h1>ORDER SEGREGATION</h1>
+        <button id="captureButton">SCAN</button>
+        <div id="cameraOutput"></div>
+    </div>
+
+    <script type="text/javascript">
+        function changeBackground() {
+            const body = document.body;
+
+            // Change the background image after clicking the button
+            body.style.backgroundImage = "url('{{ url_for('static', filename='2.jpg') }}')";
+            body.style.backgroundSize = "cover"; // Adjust to your preference
+        }
+
+        document.getElementById('captureButton').addEventListener('click', () => {
+            changeBackground();
+
+            const cameraOutput = document.getElementById('cameraOutput');
+            cameraOutput.innerHTML = 'Processing...'; // Show a message while processing
+
+            // Request access to the camera
+            navigator.mediaDevices.getUserMedia({ video: true })
+                .then((stream) => {
+                    const video = document.createElement('video');
+                    video.srcObject = stream;
+                    video.autoplay = true;
+
+                    // Append video to the output div
+                    cameraOutput.innerHTML = '';
+                    cameraOutput.appendChild(video);
+
+                    // Capture image from video feed after 5 seconds
+                    setTimeout(() => {
+                        const canvas = document.createElement('canvas');
+                        const context = canvas.getContext('2d');
+
+                        video.pause();  // Pause the video
+                        stream.getVideoTracks()[0].stop();  // Stop the video stream
+
+                        canvas.width = video.videoWidth;
+                        canvas.height = video.videoHeight;
+                        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+                        // Convert the captured image to data URL
+                        const imageDataUrl = canvas.toDataURL('image/jpeg');
+
+                        // Send the captured image data URL to the server for processing
+                        fetch('/upload', {
+                            method: 'POST',
+                            body: JSON.stringify({ imageDataUrl }),
+                            headers: {
+                                'Content-Type': 'application/json'
+                            }
+                        })
+                        .then(response => response.json())
+                        .then(data => {
+                            const output = document.getElementById('cameraOutput');
+                            output.innerHTML = '';
+
+                            for (const prediction of data.predictions) {
+                                output.innerHTML += <p class="prediction-info">Pincode: ${prediction.pincode}</p>;
+                                output.innerHTML += <p class="prediction-info">Prediction: ${prediction.prediction}</p>;
+                                output.innerHTML += <p class="prediction-info">Region: ${prediction.region}</p>;
+                                output.innerHTML += '<hr>';
+                            }
+                        });
+                    }, 3000);  // Capture after 5 seconds
+                })
+                .catch(err => console.error('Error accessing the camera:', err));
+        });
+    </script>
+</body>
+</html>
