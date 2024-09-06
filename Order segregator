@@ -96,7 +96,7 @@ def upload():
 
 if _name_ == '_main_':
     app.run(debug=True)
-[8:51 pm, 2/7/2024] Pradeepthi: <!DOCTYPE html>
+<!DOCTYPE html>
 <html>
 <head>
     <title>ORDER SEGREGATION</title>
